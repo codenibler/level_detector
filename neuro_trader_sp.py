@@ -70,3 +70,4 @@ if __name__ == '__main__':
     plt.style.use('dark_background') 
     levels = support_resistance_levels(data, 365, first_w=1.0, atr_mult=3.0)
     print(len(levels))
+    
