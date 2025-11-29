@@ -15,33 +15,42 @@ from datetime import datetime, timedelta
 """
 
 def find_levels(data, lookback, lookforward, collapse_threshold, base_decay, crowd_coeff, price_window, min_strength):
+    
+    if data.empty: # No days available
+        return pd.DataFrame(columns=['row', 'level', 'strength', 'time', 'level_type'])
+        
+    data = data.reset_index(drop=True)
+    window_end = data['datetime'].max()
+    window_start = window_end - pd.Timedelta(days=30)
+    data = data[(data['datetime'] >= window_start) & (data['datetime'] <= window_end)].reset_index(drop=True)
 
     """ Support and Resistance Functions """
     def support(df1, l, peek_back, peek_forward):         
         for i in range(l-peek_back+1, l+1):
-            if(df1.Low[i]>df1.Low[i-1]):
+            if(df1.low[i]>df1.low[i-1]):
                 return 0
         for i in range(l+1,l+peek_forward+1):
-            if(df1.Low[i]<df1.Low[i-1]):
+            if(df1.low[i]<df1.low[i-1]):
                 return 0
         return 1
     def resistance(df1, l, peek_back, peek_forward): 
         for i in range(l-peek_back+1, l+1):
-            if(df1.High[i]<df1.High[i-1]):
+            if(df1.high[i]<df1.high[i-1]):
                 return 0
         for i in range(l+1,l+peek_forward+1):
-            if(df1.High[i]>df1.High[i-1]):
+            if(df1.high[i]>df1.high[i-1]):
                 return 0
         return 1
+    
 
     """ Find all levels """
     supports = []
     resistances = []
     for row in range(lookback, data.index.max() - lookforward): 
         if support(data, row, lookback, lookforward):
-            supports.append((row,data.Low[row], data['datetime'][row], 1))
+            supports.append((row,data.low[row], data['datetime'][row], 1))
         if resistance(data, row, lookback, lookforward):
-            resistances.append((row,data.High[row], data['datetime'][row],2))
+            resistances.append((row,data.high[row], data['datetime'][row],2))
     
     """ Collapse nearby levels """ 
     supports.sort()
@@ -97,10 +106,25 @@ def find_levels(data, lookback, lookforward, collapse_threshold, base_decay, cro
     resistances = pd.DataFrame(resistances, columns=['row', 'level', 'strength', 'time'])
     resistances['level_type'] = 'resistance'
 
-    levels = pd.concat([supports, resistances], ignore_index=True)
-    levels.set_index('row', inplace=True)
-
-    return levels
+    """ Avoid concatenating empty dataframes """
+    """ Return combined levels DataFrame """
+    if resistances.empty:
+        if supports.empty:
+            return pd.DataFrame(columns=['row', 'level', 'strength', 'time', 'level_type'])
+        else:
+            supports.set_index('row', inplace=True)
+            supports = supports.sort_values(by='level', ascending=False)
+            return supports
+    else:
+        if supports.empty:
+            resistances.set_index('row', inplace=True)
+            resistances = resistances.sort_values(by='level', ascending=False)
+            return resistances
+        else:    
+            levels = pd.concat([supports, resistances], ignore_index=True)
+            levels.set_index('row', inplace=True)
+            levels = levels.sort_values(by='level', ascending=False)
+            return levels
 
 
 
@@ -113,14 +137,14 @@ if __name__ == "__main__":
     data['datetime'] = pd.to_datetime(data['datetime'])
 
     """ Run Level Detection """
-    levels_df = find_levels(data=data, lookback=4, lookforward=2, collapse_threshold=0.25,
-                             base_decay=0.0, crowd_coeff=0.25, price_window=0.5, min_strength=0.25)
+    levels_df = find_levels(data=data, lookback=4, lookforward=2, collapse_threshold=0.0,
+                             base_decay=0.0, crowd_coeff=0.0, price_window=0.5, min_strength=0.25)
 
     """ Output Levels """
     print(levels_df.head(10))
     fig = go.Figure(data=[go.Candlestick(
         x=data['datetime'],
-        open=data['open'], High=data['High'], Low=data['Low'], close=data['close'],
+        open=data['open'], high=data['high'], low=data['low'], close=data['close'],
         increasing_line_color='green', decreasing_line_color='red'
     )])
 
@@ -153,7 +177,7 @@ if __name__ == "__main__":
     collapse_threshold, base_decay, crowd_coeff, price_window, and min_strength.
 
     The function first defines two helper functions: support and resistance. These functions check if a given row in the data DataFrame has a 
-    Low value that is Lower than the previous Low value (for support) or a High value that is Higher than the previous High value (for resistance). If the condition is met, the function returns 1, otherwise it returns 0.
+    low value that is lower than the previous low value (for support) or a high value that is higher than the previous high value (for resistance). If the condition is met, the function returns 1, otherwise it returns 0.
 
     The find_levels function then finds all the levels (support and resistance) in the data DataFrame by iterating over the rows and calling the 
     support and resistance functions. The levels are stored in supports and resistances lists.
@@ -165,7 +189,7 @@ if __name__ == "__main__":
     and the effective decay based on the base_decay and crowd_coeff parameters. The strength of each level is calculated using an 
     exponential decay formula and stored in the strength column of the level.
 
-    Weak levels (with strength beLow min_strength) are then pruned from the supports and resistances lists.
+    Weak levels (with strength below min_strength) are then pruned from the supports and resistances lists.
 
     Finally, the function prepares the supports and resistances data for output by converting them into DataFrames and concatenating them into a single DataFrame called 
     levels. The levels DataFrame is indexed by the row column and returned by the function.
